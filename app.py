@@ -1,7 +1,7 @@
 import re
+import subprocess
 import requests
 import gradio as gr
-from youtube_transcript_api import YouTubeTranscriptApi
 
 HF_API_URL = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
 
@@ -13,14 +13,33 @@ def extract_video_id(url):
 
 
 def get_transcript(video_url):
-    video_id = extract_video_id(video_url)
-    if not video_id:
-        return None, "Invalid YouTube URL"
-
     try:
-        transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        text = " ".join([item["text"] for item in transcript])
-        return text, None
+        command = [
+            "yt-dlp",
+            "--skip-download",
+            "--write-auto-sub",
+            "--sub-lang", "en",
+            "--sub-format", "vtt",
+            "-o", "subtitle.%(ext)s",
+            video_url
+        ]
+
+        subprocess.run(command, check=True, capture_output=True)
+
+        # Read generated subtitle file
+        with open("subtitle.en.vtt", "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        # Remove timestamps and metadata
+        text_lines = []
+        for line in lines:
+            line = line.strip()
+            if not line or "-->" in line or line.startswith("WEBVTT"):
+                continue
+            text_lines.append(line)
+
+        return " ".join(text_lines), None
+
     except Exception as e:
         return None, str(e)
 
@@ -30,7 +49,7 @@ def summarize_text(text):
     response = requests.post(HF_API_URL, json=payload, timeout=120)
 
     if response.status_code != 200:
-        return f"Error from Hugging Face API: {response.text}"
+        return f"Hugging Face API error: {response.text}"
 
     result = response.json()
     return result[0]["summary_text"]
@@ -39,7 +58,7 @@ def summarize_text(text):
 def summarize_youtube(url):
     transcript, error = get_transcript(url)
     if error:
-        return f"Error fetching transcript: {error}"
+        return f"Transcript error: {error}"
 
     return summarize_text(transcript)
 
@@ -49,7 +68,7 @@ demo = gr.Interface(
     inputs=gr.Textbox(label="Enter YouTube Video URL"),
     outputs=gr.Textbox(label="Video Summary"),
     title="YouTube Video Summarizer",
-    description="Paste a YouTube URL to get a summarized version of the video transcript."
+    description="Summarizes YouTube videos using yt-dlp and Hugging Face AI."
 )
 
 demo.launch(server_name="0.0.0.0", server_port=7860)
