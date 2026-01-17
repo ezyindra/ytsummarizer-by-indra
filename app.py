@@ -3,16 +3,13 @@ import requests
 import gradio as gr
 from youtube_transcript_api import YouTubeTranscriptApi
 
-# Hugging Face Inference API endpoint (same model you used before)
 HF_API_URL = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
 
 
 def extract_video_id(url):
     regex = r"(?:v=|\/)([0-9A-Za-z_-]{11}).*"
     match = re.search(regex, url)
-    if match:
-        return match.group(1)
-    return None
+    return match.group(1) if match else None
 
 
 def get_transcript(video_url):
@@ -22,29 +19,25 @@ def get_transcript(video_url):
 
     try:
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        full_text = " ".join([item["text"] for item in transcript])
-        return full_text, None
+        text = " ".join([item["text"] for item in transcript])
+        return text, None
     except Exception as e:
         return None, str(e)
 
 
 def summarize_text(text):
     payload = {"inputs": text}
-
     response = requests.post(HF_API_URL, json=payload, timeout=120)
 
     if response.status_code != 200:
         return f"Error from Hugging Face API: {response.text}"
 
     result = response.json()
-    if isinstance(result, list) and "summary_text" in result[0]:
-        return result[0]["summary_text"]
-
-    return "Failed to generate summary."
+    return result[0]["summary_text"]
 
 
-def summarize_youtube(video_url):
-    transcript, error = get_transcript(video_url)
+def summarize_youtube(url):
+    transcript, error = get_transcript(url)
     if error:
         return f"Error fetching transcript: {error}"
 
