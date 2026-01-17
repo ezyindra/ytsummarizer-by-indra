@@ -1,3 +1,5 @@
+gradio
 transformers
 torch
-gradio
+youtube-transcript-api
+sentencepiece
