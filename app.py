@@ -1,70 +1,62 @@
 import re
+import requests
 import gradio as gr
-from transformers import pipeline
 from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.formatters import TextFormatter
 
-
-# Load summarizer (CPU)
-summarizer = pipeline(
-    "summarization",
-    model="sshleifer/distilbart-cnn-12-6",
-    device=-1
-)
-
-api = YouTubeTranscriptApi()
+# Hugging Face Inference API endpoint (same model you used before)
+HF_API_URL = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
 
 
 def extract_video_id(url):
-    match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", url)
-    return match.group(1) if match else None
+    regex = r"(?:v=|\/)([0-9A-Za-z_-]{11}).*"
+    match = re.search(regex, url)
+    if match:
+        return match.group(1)
+    return None
 
 
-def chunk_text(text, max_words=400):
-    words = text.split()
-    for i in range(0, len(words), max_words):
-        yield " ".join(words[i:i + max_words])
+def get_transcript(video_url):
+    video_id = extract_video_id(video_url)
+    if not video_id:
+        return None, "Invalid YouTube URL"
+
+    try:
+        transcript = YouTubeTranscriptApi.get_transcript(video_id)
+        full_text = " ".join([item["text"] for item in transcript])
+        return full_text, None
+    except Exception as e:
+        return None, str(e)
 
 
 def summarize_text(text):
-    summaries = []
+    payload = {"inputs": text}
 
-    for chunk in chunk_text(text):
-        result = summarizer(chunk, max_length=130, min_length=50, do_sample=False)
-        summaries.append(result[0]["summary_text"])
+    response = requests.post(HF_API_URL, json=payload, timeout=120)
 
-    return " ".join(summaries)
+    if response.status_code != 200:
+        return f"Error from Hugging Face API: {response.text}"
 
+    result = response.json()
+    if isinstance(result, list) and "summary_text" in result[0]:
+        return result[0]["summary_text"]
 
-def get_youtube_summary(url):
-    video_id = extract_video_id(url)
-
-    if not video_id:
-        return "❌ Invalid YouTube URL"
-
-    try:
-        transcript = api.fetch(video_id)
-
-        formatter = TextFormatter()
-        transcript_text = formatter.format_transcript(transcript)
-
-        if len(transcript_text.split()) < 50:
-            return "❌ Transcript too short to summarize."
-
-        return summarize_text(transcript_text)
-
-    except Exception as e:
-        return f"❌ Error: {e}"
+    return "Failed to generate summary."
 
 
-gr.close_all()
+def summarize_youtube(video_url):
+    transcript, error = get_transcript(video_url)
+    if error:
+        return f"Error fetching transcript: {error}"
+
+    return summarize_text(transcript)
+
 
 demo = gr.Interface(
-    fn=get_youtube_summary,
-    inputs=gr.Textbox(label="Input YouTube URL to summarize"),
-    outputs=gr.Textbox(label="Summarized text", lines=8),
-    title="Indrajeet Project 2: YouTube Script Summarizer",
-    description="THIS APPLICATION WILL BE USED TO SUMMARIZE THE YOUTUBE VIDEO SCRIPT."
+    fn=summarize_youtube,
+    inputs=gr.Textbox(label="Enter YouTube Video URL"),
+    outputs=gr.Textbox(label="Video Summary"),
+    title="YouTube Video Summarizer",
+    description="Paste a YouTube URL to get a summarized version of the video transcript."
 )
 
-demo.launch()
+demo.launch(server_name="0.0.0.0", server_port=7860)
